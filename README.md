@@ -1,0 +1,1 @@
+# zopsmart-ping-service
