@@ -6,6 +6,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
+	"github.com/fedesog/webdriver"
 	_ "github.com/go-sql-driver/mysql"
 	"log"
 	"net/http"
@@ -61,9 +62,10 @@ type transport struct {
 }
 
 var (
-	openTSDBurl = "http://localhost:4242/api/put"
-	timeout     = time.Duration(10 * time.Second) //// timeout http get request after 10 seconds
-	client      = http.Client{
+	chromeDriverPath = "/home/zopnow/work/chromedriver"
+	openTSDBurl      = "http://localhost:4242/api/put"
+	timeout          = time.Duration(10 * time.Second) //// timeout http get request after 10 seconds
+	client           = http.Client{
 		Timeout:   timeout,
 		Transport: &transport{},
 	}
@@ -107,12 +109,45 @@ func sendRequest(url string) (int64, int64, int64, int64, int64) {
 		int64(dns / time.Microsecond), int64(ssl / time.Microsecond)
 }
 
+func calculatePageLoadTime(url string) {
+	// Web driver Start
+	var start time.Time
+	var pageLoadTime time.Duration
+	chromeDriver := webdriver.NewChromeDriver(chromeDriverPath)
+	err := chromeDriver.Start()
+	if err != nil {
+		log.Println(err)
+	}
+	desired := webdriver.Capabilities{"Platform": "Linux"}
+	required := webdriver.Capabilities{}
+	session, err := chromeDriver.NewSession(desired, required)
+	if err != nil {
+		log.Println(err)
+	}
+	time.Sleep(3 * time.Second) // giving time for browser to open
+	start = time.Now()
+	err = session.Url(url)
+	pageLoadTime = time.Since(start)
+	session.Delete()
+	chromeDriver.Stop() // Web driver Stop
+	log.Println("Webpage page load time", pageLoadTime)
+	if err != nil {
+		log.Println(err)
+	}
+}
+
 // this function will execute http request and return
 // if request is servicable and Request ttfb and ttlb values
 func traceUrl(domain string) (int64, int64, int64, int64, int64) {
 	servicable, ttfb, ttlb, dns, ssl := sendRequest("http://" + domain + "/favicon.ico")
+	if servicable == 1 {
+		// get Page load time
+	}
 	if servicable == 0 {
 		servicable, ttfb, ttlb, dns, ssl = sendRequest("https://" + domain + "/favicon.ico")
+		if servicable == 1 {
+			// get Page load time
+		}
 	}
 	return servicable, ttfb, ttlb, dns, ssl
 }
@@ -134,7 +169,6 @@ func sendDataToDB(points []byte, numberOfPoints int) {
 		log.Println("response Headers:", resp.Header)
 		log.Println("Sent ", numberOfPoints, " Data Points to OpenTSDB")
 	}
-
 }
 
 func processRows(rows []organizationData, timestamp int64) {
