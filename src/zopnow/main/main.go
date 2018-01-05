@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"crypto/tls"
 	"database/sql"
 	"encoding/json"
 	"fmt"
@@ -59,26 +60,34 @@ type transport struct {
 	current *http.Request
 }
 
-// timeout http get request after 10 seconds
-var timeout = time.Duration(10 * time.Second)
-var client = http.Client{
-	Timeout:   timeout,
-	Transport: &transport{},
-}
+var (
+	openTSDBurl = "http://localhost:4242/api/put"
+	timeout     = time.Duration(10 * time.Second) //// timeout http get request after 10 seconds
+	client      = http.Client{
+		Timeout:   timeout,
+		Transport: &transport{},
+	}
+)
 
 func (t *transport) RoundTrip(req *http.Request) (*http.Response, error) {
 	t.current = req
 	return http.DefaultTransport.RoundTrip(req)
 }
 
-func sendRequest(url string) (int64, int64, int64) {
-	var start time.Time
-	var ttfb, ttlb time.Duration
+func sendRequest(url string) (int64, int64, int64, int64, int64) {
+	var start, dnsStart, tlsHandshakeStart time.Time
+	var ttfb, ttlb, dns, ssl time.Duration
 	servicable := int64(1)
 	req, _ := http.NewRequest("GET", url, nil)
 	trace := &httptrace.ClientTrace{
-		GotFirstResponseByte: func() {
-			ttfb = time.Since(start)
+		GotFirstResponseByte: func() { ttfb = time.Since(start) },
+		DNSStart:             func(httptrace.DNSStartInfo) { dnsStart = time.Now() },
+		DNSDone:              func(httptrace.DNSDoneInfo) { dns = time.Since(dnsStart) },
+		TLSHandshakeStart: func() {
+			tlsHandshakeStart = time.Now()
+		},
+		TLSHandshakeDone: func(tls.ConnectionState, error) {
+			ssl = time.Since(tlsHandshakeStart)
 		},
 	}
 	req = req.WithContext(httptrace.WithClientTrace(req.Context(), trace))
@@ -87,28 +96,29 @@ func sendRequest(url string) (int64, int64, int64) {
 	ttlb = time.Since(start)
 	if err != nil {
 		servicable = 0
-		log.Println("For URl: "+url+" TTFB: ", ttfb, " TTLB: ", ttlb, " Error: ", err)
+		log.Println("For URl: "+url+" TTFB: ", ttfb, " TTLB: ", ttlb, " DNS: ", dns, " SSL: ", ssl, " Error: ", err)
 	} else {
 		if resp.StatusCode != 200 {
 			servicable = 0
 		}
-		log.Println("For URl: "+url+" httpStatusCode:", resp.StatusCode, " TTFB:", ttfb, " TTLB:", ttlb, "\n")
+		log.Println("For URl: "+url+" httpStatusCode:", resp.StatusCode, " DNS:", dns, " SSL:", ssl, "\n")
 	}
-	return servicable, int64(ttfb / time.Microsecond), int64(ttlb / time.Microsecond)
+	return servicable, int64(ttfb / time.Microsecond), int64(ttlb / time.Microsecond),
+		int64(dns / time.Microsecond), int64(ssl / time.Microsecond)
 }
 
 // this function will execute http request and return
 // if request is servicable and Request ttfb and ttlb values
-func traceUrl(domain string) (int64, int64, int64) {
-	servicable, ttfb, ttlb := sendRequest("http://" + domain + "/favicon.ico")
+func traceUrl(domain string) (int64, int64, int64, int64, int64) {
+	servicable, ttfb, ttlb, dns, ssl := sendRequest("http://" + domain + "/favicon.ico")
 	if servicable == 0 {
-		servicable, ttfb, ttlb = sendRequest("https://" + domain + "/favicon.ico")
+		servicable, ttfb, ttlb, dns, ssl = sendRequest("https://" + domain + "/favicon.ico")
 	}
-	return servicable, ttfb, ttlb
+	return servicable, ttfb, ttlb, dns, ssl
 }
 
 func sendDataToDB(points []byte, numberOfPoints int) {
-	req, err := http.NewRequest("POST", "http://localhost:4242/api/put", bytes.NewBuffer(points))
+	req, err := http.NewRequest("POST", openTSDBurl, bytes.NewBuffer(points))
 	if err != nil {
 		log.Println(err)
 	}
@@ -136,6 +146,8 @@ func processRows(rows []organizationData, timestamp int64) {
 		var uptime DataPoint
 		var ttfb DataPoint
 		var ttlb DataPoint
+		var dns DataPoint
+		var ssl DataPoint
 
 		uptime.Metric = "domain.uptime"
 		uptime.Timestamp = timestamp
@@ -149,9 +161,18 @@ func processRows(rows []organizationData, timestamp int64) {
 		ttlb.Timestamp = timestamp
 		ttlb.Tags = Tag{domain, row.id}
 
-		uptime.Value, ttfb.Value, ttlb.Value = traceUrl(domain)
-		dataPoints = append(dataPoints, uptime, ttfb, ttlb)
+		dns.Metric = "domain.dns"
+		dns.Timestamp = timestamp
+		dns.Tags = Tag{domain, row.id}
+
+		ssl.Metric = "domain.ssl"
+		ssl.Timestamp = timestamp
+		ssl.Tags = Tag{domain, row.id}
+
+		uptime.Value, ttfb.Value, ttlb.Value, dns.Value, ssl.Value = traceUrl(domain)
+		dataPoints = append(dataPoints, uptime, ttfb, ttlb, dns, ssl)
 	}
+
 	points, err := json.Marshal(dataPoints)
 	if err != nil {
 		log.Println(err)
