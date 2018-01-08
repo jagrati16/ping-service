@@ -73,7 +73,6 @@ func traceUrl(domain string) (int64, int64, int64, int64, int64, int64) {
 			}
 		}
 	}
-	log.Println("............", servicable, ttfb, ttlb, dns, ssl, pageLoadTime)
 	return servicable, ttfb, ttlb, dns, ssl, pageLoadTime
 }
 
@@ -115,7 +114,7 @@ func processRows(rows []organizationData, timestamp int64) {
 		pageLoad.Tags = Tag{domain, row.id}
 
 		uptime.Value, ttfb.Value, ttlb.Value, dns.Value, ssl.Value, pageLoad.Value = traceUrl(domain)
-		dataPoints = append(dataPoints, uptime, ttfb, ttlb, dns, ssl)
+		dataPoints = append(dataPoints, uptime, ttfb, ttlb, dns, ssl, pageLoad)
 	}
 
 	points, err := json.Marshal(dataPoints)
