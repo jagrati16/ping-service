@@ -41,6 +41,8 @@ type PerfLog struct {
 	WebView string                     `json:"webview"`
 }
 
+// creates a chrome web driver and logs the performace
+// From the data we get page load time
 func CalculatePageLoadTime(url string) (int64, error) {
 	chromeDriver := webdriver.NewChromeDriver(chromeDriverPath)
 	err := chromeDriver.Start()
@@ -88,6 +90,7 @@ func CalculatePageLoadTime(url string) (int64, error) {
 	return pageLoadTime * 1000, nil // converting page load timings to micro second
 }
 
+// Sends set of data points to openTSDB
 func SendDataToDB(points []byte, numberOfPoints int) {
 	req, err := http.NewRequest("POST", openTSDBurl, bytes.NewBuffer(points))
 	if err != nil {
@@ -107,6 +110,7 @@ func SendDataToDB(points []byte, numberOfPoints int) {
 	}
 }
 
+// Trace ttfb, ttlb, dns, ssl values from http request
 func SendRequest(url string) (int64, int64, int64, int64, int64) {
 	var start, dnsStart, tlsHandshakeStart time.Time
 	var ttfb, ttlb, dns, ssl time.Duration

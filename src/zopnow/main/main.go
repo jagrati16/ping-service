@@ -53,8 +53,8 @@ type DataPoint struct {
 	Tags      Tag    `json:"tags"`
 }
 
-// this function will execute http request and return
-// if request is servicable and Request ttfb and ttlb values
+// this function will execute http request
+// Retruns if domain is servicable and its ttfb, ttlb, dns, ssl, pageLoadTime value
 func traceUrl(domain string) (int64, int64, int64, int64, int64, int64) {
 	var err error
 	var pageLoadTime = int64(-1)
@@ -76,6 +76,8 @@ func traceUrl(domain string) (int64, int64, int64, int64, int64, int64) {
 	return servicable, ttfb, ttlb, dns, ssl, pageLoadTime
 }
 
+// Processes array of organization data
+// For each row it creates dataPoints for each metric and send the data points to openTSDB
 func processRows(rows []organizationData, timestamp int64) {
 	var dataPoints []DataPoint
 
@@ -124,6 +126,7 @@ func processRows(rows []organizationData, timestamp int64) {
 	utils.SendDataToDB(points, len(dataPoints))
 }
 
+// Slice the array of organizations data into chunck of 10 data points
 func sliceRows(orgData []organizationData) [][]organizationData {
 	var divided [][]organizationData
 	chunkSize := 10
@@ -143,7 +146,7 @@ func main() {
 	var wg sync.WaitGroup
 	var timestamp = time.Now().Unix()
 
-	// query to get all the organization-domain details
+	// Query to mysql DB to get all the organization-domain details
 	rows, err := db.Query("select id,name,domain from organizations where deleted_at is null and domain is not null")
 	if err != nil {
 		fmt.Println(err)
