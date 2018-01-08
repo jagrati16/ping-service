@@ -81,7 +81,11 @@ func CalculatePageLoadTime(url string) (int64, error) {
 	if err != nil {
 		return int64(-1), err
 	}
-	return har.Log.Pages[0].PageTimings.OnLoad * 1000, nil // converting page load timings to micro second
+	var pageLoadTime = int64(0)
+	for _, val := range har.Log.Pages {
+		pageLoadTime += val.PageTimings.OnLoad
+	}
+	return pageLoadTime * 1000, nil // converting page load timings to micro second
 }
 
 func SendDataToDB(points []byte, numberOfPoints int) {
@@ -135,33 +139,3 @@ func SendRequest(url string) (int64, int64, int64, int64, int64) {
 	return servicable, int64(ttfb / time.Microsecond), int64(ttlb / time.Microsecond),
 		int64(dns / time.Microsecond), int64(ssl / time.Microsecond)
 }
-
-// func calculatePageLoadTime(url string) {
-// 	// Web driver Start
-// 	var start time.Time
-// 	var pageLoadTime time.Duration
-// 	chromeDriver := webdriver.NewChromeDriver(chromeDriverPath)
-// 	err := chromeDriver.Start()
-// 	if err != nil {
-// 		log.Println(err)
-// 	}
-// 	defer chromeDriver.Stop()
-
-// 	desired := webdriver.Capabilities{"Platform": "Linux"}
-// 	required := webdriver.Capabilities{}
-// 	session, err := chromeDriver.NewSession(desired, required)
-// 	if err != nil {
-// 		log.Println(err)
-// 	}
-// 	defer session.Delete()
-// 	time.Sleep(3 * time.Second) // giving time for browser to open
-// 	start = time.Now()
-// 	err = session.Url(url)
-// 	pageLoadTime = time.Since(start)
-
-// 	// Web driver Stop
-// 	log.Println("Webpage page load time", pageLoadTime)
-// 	if err != nil {
-// 		log.Println(err)
-// 	}
-// }

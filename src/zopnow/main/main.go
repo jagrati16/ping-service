@@ -60,14 +60,14 @@ func traceUrl(domain string) (int64, int64, int64, int64, int64, int64) {
 	var pageLoadTime = int64(-1)
 	servicable, ttfb, ttlb, dns, ssl := utils.SendRequest("http://" + domain + "/favicon.ico")
 	if servicable == 1 {
-		pageLoadTime, err = utils.CalculatePageLoadTime("http://" + domain + "/favicon.ico")
+		pageLoadTime, err = utils.CalculatePageLoadTime("http://" + domain)
 		if err != nil {
 			log.Println(err)
 		}
 	} else {
 		servicable, ttfb, ttlb, dns, ssl = utils.SendRequest("https://" + domain + "/favicon.ico")
 		if servicable == 1 {
-			pageLoadTime, err = utils.CalculatePageLoadTime("http://" + domain + "/favicon.ico")
+			pageLoadTime, err = utils.CalculatePageLoadTime("http://" + domain)
 			if err != nil {
 				log.Println(err)
 			}
@@ -140,14 +140,12 @@ func sliceRows(orgData []organizationData) [][]organizationData {
 }
 
 func main() {
-	//log.Println("Page Load time", utils.CalculatePageLoadTime("https://www.google.com"))
-
 	var orgData []organizationData
 	var wg sync.WaitGroup
 	var timestamp = time.Now().Unix()
 
 	// query to get all the organization-domain details
-	rows, err := db.Query("select id,name,domain from organizations where deleted_at is null and domain is not null limit 1")
+	rows, err := db.Query("select id,name,domain from organizations where deleted_at is null and domain is not null")
 	if err != nil {
 		fmt.Println(err)
 	}
