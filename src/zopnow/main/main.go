@@ -1,17 +1,14 @@
 package main
 
 import (
-	"bytes"
-	"crypto/tls"
 	"database/sql"
 	"encoding/json"
 	"fmt"
 	_ "github.com/go-sql-driver/mysql"
 	"log"
-	"net/http"
-	"net/http/httptrace"
 	"sync"
 	"time"
+	"zopnow/utils"
 )
 
 var db *sql.DB
@@ -56,85 +53,28 @@ type DataPoint struct {
 	Tags      Tag    `json:"tags"`
 }
 
-type transport struct {
-	current *http.Request
-}
-
-var (
-	openTSDBurl = "http://localhost:4242/api/put"
-	timeout     = time.Duration(10 * time.Second) //// timeout http get request after 10 seconds
-	client      = http.Client{
-		Timeout:   timeout,
-		Transport: &transport{},
-	}
-)
-
-func (t *transport) RoundTrip(req *http.Request) (*http.Response, error) {
-	t.current = req
-	return http.DefaultTransport.RoundTrip(req)
-}
-
-func sendRequest(url string) (int64, int64, int64, int64, int64) {
-	var start, dnsStart, tlsHandshakeStart time.Time
-	var ttfb, ttlb, dns, ssl time.Duration
-	servicable := int64(1)
-	req, _ := http.NewRequest("GET", url, nil)
-	trace := &httptrace.ClientTrace{
-		GotFirstResponseByte: func() { ttfb = time.Since(start) },
-		DNSStart:             func(httptrace.DNSStartInfo) { dnsStart = time.Now() },
-		DNSDone:              func(httptrace.DNSDoneInfo) { dns = time.Since(dnsStart) },
-		TLSHandshakeStart: func() {
-			tlsHandshakeStart = time.Now()
-		},
-		TLSHandshakeDone: func(tls.ConnectionState, error) {
-			ssl = time.Since(tlsHandshakeStart)
-		},
-	}
-	req = req.WithContext(httptrace.WithClientTrace(req.Context(), trace))
-	start = time.Now()
-	resp, err := client.Do(req)
-	ttlb = time.Since(start)
-	if err != nil {
-		servicable = 0
-		log.Println("For URl: "+url+" TTFB: ", ttfb, " TTLB: ", ttlb, " DNS: ", dns, " SSL: ", ssl, " Error: ", err)
-	} else {
-		if resp.StatusCode != 200 {
-			servicable = 0
-		}
-		log.Println("For URl: "+url+" httpStatusCode:", resp.StatusCode, " DNS:", dns, " SSL:", ssl, "\n")
-	}
-	return servicable, int64(ttfb / time.Microsecond), int64(ttlb / time.Microsecond),
-		int64(dns / time.Microsecond), int64(ssl / time.Microsecond)
-}
-
 // this function will execute http request and return
 // if request is servicable and Request ttfb and ttlb values
-func traceUrl(domain string) (int64, int64, int64, int64, int64) {
-	servicable, ttfb, ttlb, dns, ssl := sendRequest("http://" + domain + "/favicon.ico")
-	if servicable == 0 {
-		servicable, ttfb, ttlb, dns, ssl = sendRequest("https://" + domain + "/favicon.ico")
-	}
-	return servicable, ttfb, ttlb, dns, ssl
-}
-
-func sendDataToDB(points []byte, numberOfPoints int) {
-	req, err := http.NewRequest("POST", openTSDBurl, bytes.NewBuffer(points))
-	if err != nil {
-		log.Println(err)
-	}
-	req.Header.Set("Content-Type", "application/json")
-	dbClient := &http.Client{}
-	resp, err := dbClient.Do(req)
-	if err != nil {
-		log.Println(err)
-		log.Println("Could not send ", numberOfPoints, " Data Points to OpenTSDB")
+func traceUrl(domain string) (int64, int64, int64, int64, int64, int64) {
+	var err error
+	var pageLoadTime = int64(-1)
+	servicable, ttfb, ttlb, dns, ssl := utils.SendRequest("http://" + domain + "/favicon.ico")
+	if servicable == 1 {
+		pageLoadTime, err = utils.CalculatePageLoadTime("http://" + domain)
+		if err != nil {
+			log.Println(err)
+		}
 	} else {
-		defer resp.Body.Close()
-		log.Println("response Status:", resp.Status)
-		log.Println("response Headers:", resp.Header)
-		log.Println("Sent ", numberOfPoints, " Data Points to OpenTSDB")
+		servicable, ttfb, ttlb, dns, ssl = utils.SendRequest("https://" + domain + "/favicon.ico")
+		if servicable == 1 {
+			pageLoadTime, err = utils.CalculatePageLoadTime("http://" + domain)
+			if err != nil {
+				log.Println(err)
+			}
+		}
 	}
-
+	log.Println("............", servicable, ttfb, ttlb, dns, ssl, pageLoadTime)
+	return servicable, ttfb, ttlb, dns, ssl, pageLoadTime
 }
 
 func processRows(rows []organizationData, timestamp int64) {
@@ -148,6 +88,7 @@ func processRows(rows []organizationData, timestamp int64) {
 		var ttlb DataPoint
 		var dns DataPoint
 		var ssl DataPoint
+		var pageLoad DataPoint
 
 		uptime.Metric = "domain.uptime"
 		uptime.Timestamp = timestamp
@@ -169,7 +110,11 @@ func processRows(rows []organizationData, timestamp int64) {
 		ssl.Timestamp = timestamp
 		ssl.Tags = Tag{domain, row.id}
 
-		uptime.Value, ttfb.Value, ttlb.Value, dns.Value, ssl.Value = traceUrl(domain)
+		pageLoad.Metric = "domain.pageLoad"
+		pageLoad.Timestamp = timestamp
+		pageLoad.Tags = Tag{domain, row.id}
+
+		uptime.Value, ttfb.Value, ttlb.Value, dns.Value, ssl.Value, pageLoad.Value = traceUrl(domain)
 		dataPoints = append(dataPoints, uptime, ttfb, ttlb, dns, ssl)
 	}
 
@@ -177,7 +122,7 @@ func processRows(rows []organizationData, timestamp int64) {
 	if err != nil {
 		log.Println(err)
 	}
-	sendDataToDB(points, len(dataPoints))
+	utils.SendDataToDB(points, len(dataPoints))
 }
 
 func sliceRows(orgData []organizationData) [][]organizationData {
