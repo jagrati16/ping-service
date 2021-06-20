@@ -1,4 +1,4 @@
-# zopsmart-ping-service
+# ping-service
 
 ### What is this repository for? ###
 This Repository is for pinging the **Domains** served by Zopsmart Technologies and store the performancs statistics in OpenTSDB.
